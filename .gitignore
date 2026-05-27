@@ -1,0 +1,21 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Environment variables (API Keys)
+.env
+
+# Application output
+output/
+*.xlsx
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
