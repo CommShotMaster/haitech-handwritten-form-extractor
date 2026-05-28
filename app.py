@@ -438,14 +438,24 @@ class FormExtractorApp(ctk.CTk):
         self.review_btn.pack(side=RIGHT, padx=(0, 10))
 
         self.save_btn = ctk.CTkButton(
-            top_row, text="💾  Save to Excel",
+            top_row, text="💾  Excel",
             font=("Segoe UI", 13, "bold"),
             fg_color=SUCCESS_CLR, hover_color=SUCCESS_HOVER, text_color=PRIMARY_TEXT,
             text_color_disabled=PRIMARY_TEXT,
-            corner_radius=10, height=46, width=170,
+            corner_radius=10, height=46, width=110,
             command=self._save_excel, state="disabled"
         )
         self.save_btn.pack(side=RIGHT)
+
+        self.sheets_btn = ctk.CTkButton(
+            top_row, text="☁️  Google Sheets",
+            font=("Segoe UI", 13, "bold"),
+            fg_color="#34A853", hover_color="#2b8c45", text_color=PRIMARY_TEXT,
+            text_color_disabled=PRIMARY_TEXT,
+            corner_radius=10, height=46, width=150,
+            command=self._save_sheets, state="disabled"
+        )
+        self.sheets_btn.pack(side=RIGHT, padx=(0, 10))
 
         # Progress bar
         self.progress_bar = ctk.CTkProgressBar(
@@ -734,6 +744,7 @@ class FormExtractorApp(ctk.CTk):
         
         has_data = len(self.all_data) > 0
         self.save_btn.configure(state="normal" if has_data else "disabled")
+        self.sheets_btn.configure(state="normal" if has_data else "disabled")
         self.review_btn.configure(state="normal" if has_data else "disabled")
         self.is_processing = False
 
@@ -813,14 +824,14 @@ class FormExtractorApp(ctk.CTk):
             center_align = Alignment(horizontal='center', vertical='center')
             left_align = Alignment(horizontal='left', vertical='center')
 
-            # 1. Add Title Row (Merged A1:J1)
-            ws.merge_cells('A1:J1')
+            # 1. Add Title Row (Merged A1:I1)
+            ws.merge_cells('A1:I1')
             ws['A1'] = event_title
             ws['A1'].font = title_font
             ws['A1'].alignment = center_align
 
             # 2. Add Headers (Row 2)
-            headers = ["", "Label", "Attd.", "NAME", "NAME", "Class", "Meal", "Mobile", "", "REMARK"]
+            headers = ["", "Label", "Attd.", "NAME", "NAME", "Class", "Meal", "Mobile", "REMARK"]
             for col_idx, header in enumerate(headers, start=1):
                 cell = ws.cell(row=2, column=col_idx, value=header)
                 cell.font = bold_font
@@ -832,7 +843,7 @@ class FormExtractorApp(ctk.CTk):
             for data in self.all_data:
                 if data.get("_status") == "success":
                     # Fill row with empty strings first to apply borders
-                    for col_idx in range(1, 11):
+                    for col_idx in range(1, 10):
                         cell = ws.cell(row=current_row, column=col_idx, value="")
                         cell.border = thin_border
                     
@@ -848,7 +859,7 @@ class FormExtractorApp(ctk.CTk):
             col_widths = {
                 'A': 5, 'B': 8, 'C': 8, 
                 'D': 15, 'E': 30, 'F': 10, 
-                'G': 10, 'H': 18, 'I': 18, 'J': 20
+                'G': 10, 'H': 18, 'I': 20
             }
             for col_letter, width in col_widths.items():
                 ws.column_dimensions[col_letter].width = width
@@ -863,6 +874,100 @@ class FormExtractorApp(ctk.CTk):
 
         except Exception as e:
             messagebox.showerror("Save Error", f"Could not save file:\n{e}")
+
+    def _save_sheets(self):
+        """Export data directly to Google Sheets."""
+        if not self.all_data:
+            messagebox.showwarning("No Data", "No extraction results to save.")
+            return
+
+        dialog = SheetsExportDialog(self)
+        self.wait_window(dialog)
+        
+        if not dialog.result:
+            return
+            
+        mode = dialog.result["mode"]
+        val = dialog.result["value"]
+        
+        self.status_label.configure(text="☁️  Connecting to Google Sheets...", text_color=WARNING)
+        self.update()
+        
+        def run_export():
+            try:
+                from google_sheets import export_to_google_sheets
+                url = export_to_google_sheets(
+                    self.all_data, 
+                    event_title=val if mode == "new" else "", 
+                    is_new=(mode == "new"), 
+                    sheet_url=val if mode == "existing" else ""
+                )
+                self.after(0, lambda: self.status_label.configure(text="✅  Exported to Google Sheets!", text_color=SUCCESS_CLR))
+                self.after(0, lambda: messagebox.showinfo("Success", f"Data exported successfully!\n\n{url}"))
+            except Exception as e:
+                self.after(0, lambda err=e: self.status_label.configure(text="❌  Export failed", text_color=DANGER))
+                self.after(0, lambda err=e: messagebox.showerror("Google Sheets Error", str(err)))
+                
+        threading.Thread(target=run_export, daemon=True).start()
+
+
+# ─── Dialogs ───────────────────────────────────────────────────────────────
+
+class SheetsExportDialog(ctk.CTkToplevel):
+    """Dialog to choose Google Sheets export settings."""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("☁️ Export to Google Sheets")
+        self.geometry("450x300")
+        self.configure(fg_color=SURFACE)
+        self.result = None
+        
+        # Center dialog
+        self.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - (450 // 2)
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - (300 // 2)
+        self.geometry(f"+{x}+{y}")
+        
+        self.mode_var = ctk.StringVar(value="new")
+        
+        ctk.CTkLabel(self, text="How would you like to export?", font=("Segoe UI", 16, "bold"), text_color=TEXT_MAIN).pack(pady=(20, 10))
+        
+        radio_frame = ctk.CTkFrame(self, fg_color="transparent")
+        radio_frame.pack(pady=10)
+        
+        ctk.CTkRadioButton(radio_frame, text="Create New Spreadsheet", font=("Segoe UI", 13), variable=self.mode_var, value="new", command=self._toggle_mode).pack(side=LEFT, padx=10)
+        ctk.CTkRadioButton(radio_frame, text="Append to Existing", font=("Segoe UI", 13), variable=self.mode_var, value="existing", command=self._toggle_mode).pack(side=LEFT, padx=10)
+        
+        self.input_label = ctk.CTkLabel(self, text="Event Title (This will be the Sheet Name):", font=("Segoe UI", 12), text_color=TEXT_DIM)
+        self.input_label.pack(pady=(15, 5))
+        
+        self.input_entry = ctk.CTkEntry(self, width=350, height=35)
+        self.input_entry.pack(pady=5)
+        
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(pady=20)
+        
+        ctk.CTkButton(btn_frame, text="Cancel", fg_color=SURFACE_3, hover_color=BORDER_CLR, text_color=TEXT_MAIN, command=self.destroy).pack(side=LEFT, padx=10)
+        ctk.CTkButton(btn_frame, text="🚀 Export", fg_color="#34A853", hover_color="#2b8c45", text_color=PRIMARY_TEXT, command=self._on_submit).pack(side=LEFT, padx=10)
+        
+        self.grab_set()
+        self.focus()
+        
+    def _toggle_mode(self):
+        if self.mode_var.get() == "new":
+            self.input_label.configure(text="Event Title (This will be the Sheet Name):")
+            self.input_entry.delete(0, 'end')
+        else:
+            self.input_label.configure(text="Existing Spreadsheet URL or ID:")
+            self.input_entry.delete(0, 'end')
+            
+    def _on_submit(self):
+        val = self.input_entry.get().strip()
+        if not val:
+            messagebox.showwarning("Input Required", "Please provide a value.")
+            return
+        self.result = {"mode": self.mode_var.get(), "value": val}
+        self.destroy()
 
 
 # ─── Review Dialog ──────────────────────────────────────────────────────────
